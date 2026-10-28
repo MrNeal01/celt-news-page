@@ -3,6 +3,13 @@
 <head>
   <meta charset="utf-8">
   <title>CELT News</title>
+  <script>
+    // The old GitHub Pages address is still embedded on the CELT website.
+    // Send it to the live page on the VPS, which has the LinkedIn feed.
+    if (location.hostname === 'mrneal01.github.io') {
+      location.replace('https://celt-feed.104-249-8-87.nip.io/');
+    }
+  </script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #1a1a2e; display: flex; align-items: center; justify-content: center; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
