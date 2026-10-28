@@ -10,11 +10,13 @@ Routes
   /auth/login       start OAuth as a Super admin of the CELT LinkedIn page
   /auth/callback    OAuth redirect target (must be added on the app's Auth tab)
   /api/posts        cached posts, refreshed from LinkedIn at most once per CACHE_TTL
+  /api/bulletin     newest CELT Bulletin in the public Google Drive folder
   /api/health       token lifetime, last fetch, last error
   /api/orgs         organizations the stored token administers (setup check)
 """
 
 import hashlib
+import html
 import json
 import os
 import re
@@ -43,6 +45,7 @@ CACHE_TTL = int(os.environ.get("CACHE_TTL", "3600"))
 POSTS_LIMIT = int(os.environ.get("POSTS_LIMIT", "6"))
 DATA_DIR = Path(os.environ.get("DATA_DIR", BASE_DIR / "data"))
 PAGE_FILE = BASE_DIR.parent / "index.html"
+BULLETIN_FOLDER_ID = os.environ.get("BULLETIN_FOLDER_ID", "1nG_aYIskjajCAoFxWOaekjcRaktm9c6H")
 
 ORG_URN = f"urn:li:organization:{ORG_ID}"
 AUTH_URL = "https://www.linkedin.com/oauth/v2/authorization"
@@ -51,6 +54,7 @@ REST = "https://api.linkedin.com/rest"
 
 TOKEN_FILE = DATA_DIR / "token.json"
 CACHE_FILE = DATA_DIR / "posts_cache.json"
+BULLETIN_FILE = DATA_DIR / "bulletin_cache.json"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
@@ -250,6 +254,59 @@ def fetch_posts():
     return parse_posts(elements, images, videos)
 
 
+# ── CELT Bulletin ────────────────────────────────────────────────────────────
+
+_ENTRY = re.compile(
+    r'id="entry-([\w-]+)".*?class="flip-entry-title">(.*?)</div>', re.S
+)
+_VOLUME = re.compile(r"vol\.?\s*(\d+)", re.I)
+_bulletin = _read_json(BULLETIN_FILE, {"fetched_at": 0, "latest": None})
+_bulletin_lock = threading.Lock()
+
+
+def latest_bulletin(folder_html):
+    """Pick the highest 'Vol. N' file from Drive's public embedded folder view.
+
+    Volume numbers decide, not dates: older issues were re-uploaded later.
+    """
+    best = None
+    for file_id, raw_name in _ENTRY.findall(folder_html):
+        name = re.sub(r"\s+", " ", html.unescape(raw_name)).strip()
+        name = re.sub(r"\s*\.pdf$", "", name, flags=re.I)
+        m = _VOLUME.search(name)
+        if m and (best is None or int(m.group(1)) > best["volume"]):
+            best = {"id": file_id, "title": name, "volume": int(m.group(1))}
+    if not best:
+        return None
+    return {
+        **best,
+        "url": f"https://drive.google.com/file/d/{best['id']}/view",
+        "cover": f"https://drive.google.com/thumbnail?id={best['id']}&sz=w600",
+    }
+
+
+def _bulletin_latest():
+    """Refresh at most once per CACHE_TTL; on failure keep the last known issue."""
+    global _bulletin
+    with _bulletin_lock:
+        if time.time() - _bulletin["fetched_at"] < CACHE_TTL:
+            return _bulletin["latest"]
+        try:
+            r = requests.get("https://drive.google.com/embeddedfolderview",
+                             params={"id": BULLETIN_FOLDER_ID}, timeout=15)
+            r.raise_for_status()
+            latest = latest_bulletin(r.text)
+            if not latest:
+                raise RuntimeError("no 'Vol. N' files found in the bulletin folder")
+            _bulletin = {"fetched_at": int(time.time()), "latest": latest}
+            _write_json(BULLETIN_FILE, _bulletin)
+        except Exception as e:
+            app.logger.warning("Bulletin refresh failed: %s", e)
+            # Retry in 5 minutes rather than on every request.
+            _bulletin["fetched_at"] = int(time.time()) - CACHE_TTL + 300
+        return _bulletin["latest"]
+
+
 # ── Cache ────────────────────────────────────────────────────────────────────
 
 def _refresh_cache():
@@ -368,6 +425,17 @@ def api_posts():
         "fetched_at": _cache["fetched_at"],
         "posts": _cache["posts"],
     })
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
+
+
+@app.get("/api/bulletin")
+def api_bulletin():
+    latest = _bulletin_latest()
+    folder_url = f"https://drive.google.com/drive/folders/{BULLETIN_FOLDER_ID}"
+    if not latest:
+        return jsonify({"error": "Bulletin folder could not be read", "folder_url": folder_url}), 503
+    resp = jsonify({**latest, "folder_url": folder_url})
     resp.headers["Cache-Control"] = "public, max-age=300"
     return resp
 
