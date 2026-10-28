@@ -22,7 +22,7 @@ The app needs the Community Management API scopes
 ```bash
 cd server
 pip install -r requirements.txt
-cp .env.example .env      # fill in LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET
+cp .env.example .env      # paste the Client Secret into LINKEDIN_CLIENT_SECRET
 python app.py
 ```
 
@@ -42,7 +42,13 @@ python app.py
   `LINKEDIN_FEED_API` near the bottom of the page template to this server's
   URL, e.g. `https://celt-feed.mef.edu.tr`. The page must be HTTPS-to-HTTPS.
 - `server/data/` holds the token and post cache. Keep it out of git (it is in
-  `.gitignore`) and on persistent storage.
+  `.gitignore`) and on persistent storage. The token file is a live credential:
+  never put this folder in a web-served directory.
+- The app is on LinkedIn's **Development Tier**. Its 500 calls/day limit is
+  plenty (~48/day used), but before the feed goes on a public production site,
+  apply for the Community Management API **Standard Tier** upgrade in the
+  LinkedIn developer portal. LinkedIn asks for a screen recording of the
+  integration.
 
 ## Routes
 

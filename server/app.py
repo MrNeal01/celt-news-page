@@ -71,9 +71,14 @@ def _read_json(path, default=None):
         return default
 
 
-def _write_json(path, data):
+def _write_json(path, data, private=False):
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    if private:
+        try:
+            os.chmod(tmp, 0o600)  # no effect on Windows
+        except OSError:
+            pass
     tmp.replace(path)
 
 
@@ -98,7 +103,7 @@ def _save_token(tok, previous=None):
             else previous.get("refresh_token_expires_at")
         ),
     }
-    _write_json(TOKEN_FILE, data)
+    _write_json(TOKEN_FILE, data, private=True)
     return data
 
 
